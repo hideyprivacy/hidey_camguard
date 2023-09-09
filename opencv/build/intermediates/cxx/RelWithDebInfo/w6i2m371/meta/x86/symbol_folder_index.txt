@@ -1,0 +1,1 @@
+/Users/jacobaudu/AndroidStudioProjects/HideyCamGuard/sdk/build/intermediates/cxx/RelWithDebInfo/w6i2m371/obj/x86

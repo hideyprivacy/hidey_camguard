@@ -1,0 +1,27 @@
+{
+  "buildFiles": [
+    "/Users/jacobaudu/AndroidStudioProjects/HideyCamGuard/opencv/libcxx_helper/CMakeLists.txt"
+  ],
+  "cleanCommandsComponents": [
+    [
+      "/Users/jacobaudu/Library/Android/sdk/cmake/3.18.1/bin/ninja",
+      "-C",
+      "/Users/jacobaudu/AndroidStudioProjects/HideyCamGuard/opencv/.cxx/Debug/3w2w1x5c/arm64-v8a",
+      "clean"
+    ]
+  ],
+  "buildTargetsCommandComponents": [
+    "/Users/jacobaudu/Library/Android/sdk/cmake/3.18.1/bin/ninja",
+    "-C",
+    "/Users/jacobaudu/AndroidStudioProjects/HideyCamGuard/opencv/.cxx/Debug/3w2w1x5c/arm64-v8a",
+    "{LIST_OF_TARGETS_TO_BUILD}"
+  ],
+  "libraries": {
+    "opencv_jni_shared::@6890427a1f51a3e7e1df": {
+      "artifactName": "opencv_jni_shared",
+      "abi": "arm64-v8a",
+      "output": "/Users/jacobaudu/AndroidStudioProjects/HideyCamGuard/opencv/.cxx/Debug/3w2w1x5c/arm64-v8a/libopencv_jni_shared.a",
+      "runtimeFiles": []
+    }
+  }
+}
