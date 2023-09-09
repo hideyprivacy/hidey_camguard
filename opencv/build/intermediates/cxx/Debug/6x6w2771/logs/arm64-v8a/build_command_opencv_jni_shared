@@ -1,4 +1,0 @@
-/Users/jacobaudu/Library/Android/sdk/cmake/3.18.1/bin/ninja \
-  -C \
-  /Users/jacobaudu/AndroidStudioProjects/HideyCamGuard/sdk/.cxx/Debug/6x6w2771/arm64-v8a \
-  opencv_jni_shared
