@@ -3,8 +3,6 @@ package com.example.hideycamguard
 import android.graphics.*
 import android.media.Image
 import androidx.core.math.MathUtils
-import org.opencv.core.CvType
-import org.opencv.core.Mat
 import java.io.ByteArrayOutputStream
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -18,28 +16,26 @@ class ImageUtil {
             return outputStream.toByteArray()
         }
 
-        fun matToByteBuffer(mat: Mat): ByteBuffer {
+        fun bitmapToByteBuffer(bitmap: Bitmap): ByteBuffer {
+            val width = bitmap.width
+            val height = bitmap.height
+            val size = width * height
+            val intValues = IntArray(size)
+            val floatValues = FloatArray(size * 3) // Assuming RGB format
 
-            val tempMat = Mat(mat.rows(), mat.cols(), CvType.CV_32F)
-            mat.convertTo(tempMat, CvType.CV_32F, 1.0 / 255.0)  // Normalize
+            bitmap.getPixels(intValues, 0, bitmap.width, 0, 0, bitmap.width, bitmap.height)
 
-            val byteBuffer = ByteBuffer.allocateDirect(4 * tempMat.rows() * tempMat.cols() * tempMat.channels())  // float32 has 4 bytes
-            byteBuffer.order(ByteOrder.nativeOrder())
-
-            val floatArray = FloatArray(tempMat.rows() * tempMat.cols() * tempMat.channels())
-            tempMat.get(0, 0, floatArray)
-
-            byteBuffer.rewind()
-            for (i in floatArray.indices) {
-                byteBuffer.putFloat(floatArray[i])
+            for (i in 0 until intValues.size) {
+                val value = intValues[i]
+                floatValues[i * 3] = ((value shr 16 and 0xFF) / 255.0f) // R
+                floatValues[i * 3 + 1] = ((value shr 8 and 0xFF) / 255.0f) // G
+                floatValues[i * 3 + 2] = ((value and 0xFF) / 255.0f) // B
             }
 
+            val byteBuffer = ByteBuffer.allocateDirect(4 * floatValues.size)
+            byteBuffer.order(ByteOrder.nativeOrder())
+            byteBuffer.asFloatBuffer().put(floatValues)
             return byteBuffer
-        }
-
-
-        fun bytesToBitmap(bytes: ByteArray): Bitmap {
-            return BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
         }
 
         fun yuv420ToBitmap(image: Image): Bitmap {
@@ -121,34 +117,6 @@ class ImageUtil {
                 }
             }
             return Bitmap.createBitmap(argbArray, imageWidth, imageHeight, Bitmap.Config.ARGB_8888)
-        }
-
-        fun nv21ToBitmap(nv21: ByteArray, width: Int, height: Int): Bitmap {
-            val yuvImage = YuvImage(nv21, ImageFormat.NV21, width, height, null)
-            val out = ByteArrayOutputStream()
-            yuvImage.compressToJpeg(Rect(0, 0, width, height), 100, out)
-            val imageBytes = out.toByteArray()
-            return BitmapFactory.decodeByteArray(imageBytes, 0, imageBytes.size)
-        }
-
-        fun imageToNV21(image: Image): ByteArray {
-            val nv21: ByteArray
-            val yBuffer = image.planes[0].buffer
-            val uBuffer = image.planes[1].buffer
-            val vBuffer = image.planes[2].buffer
-
-            val ySize = yBuffer.remaining()
-            val uSize = uBuffer.remaining()
-            val vSize = vBuffer.remaining()
-
-            nv21 = ByteArray(ySize + uSize + vSize)
-
-            // U and V are swapped
-            yBuffer.get(nv21, 0, ySize)
-            vBuffer.get(nv21, ySize, vSize)
-            uBuffer.get(nv21, ySize + vSize, uSize)
-
-            return nv21
         }
     }
 }

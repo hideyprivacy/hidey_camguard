@@ -14,4 +14,3 @@ dependencyResolutionManagement {
 }
 rootProject.name = "HideyCamGuard"
 include ':app'
-include ':opencv'

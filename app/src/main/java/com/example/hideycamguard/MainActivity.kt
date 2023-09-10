@@ -25,16 +25,9 @@ import android.widget.VideoView
 import androidx.annotation.RequiresApi
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
+import com.example.hideycamguard.ImageUtil.Companion.bitmapToByteBuffer
 import com.example.hideycamguard.ImageUtil.Companion.bitmapToJpeg
-import com.example.hideycamguard.ImageUtil.Companion.bytesToBitmap
-import com.example.hideycamguard.ImageUtil.Companion.imageToNV21
-import com.example.hideycamguard.ImageUtil.Companion.matToByteBuffer
-import com.example.hideycamguard.ImageUtil.Companion.nv21ToBitmap
 import com.example.hideycamguard.ImageUtil.Companion.yuv420ToBitmap
-import org.opencv.android.OpenCVLoader
-import org.opencv.android.Utils
-import org.opencv.core.*
-import org.opencv.imgproc.Imgproc
 import org.tensorflow.lite.Interpreter
 import org.tensorflow.lite.InterpreterApi
 import java.io.FileInputStream
@@ -59,7 +52,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var cameraManager: CameraManager
     private lateinit var frontCameraId: String
 
-    private val capturedMats: MutableList<Mat> = mutableListOf()
+    //private val capturedMats: MutableList<Mat> = mutableListOf()
+    private val capturedBitmap: MutableList<Bitmap> = mutableListOf()
 
     private var captureInterval = 15000 // 15 seconds, can be updated
     private val maxCaptures = 10
@@ -81,7 +75,6 @@ class MainActivity : AppCompatActivity() {
         quitButton = findViewById(R.id.quitButton)
 
         initializeWebView()
-        initializeOpenCV()
         initializeModel()
         initializeFrontCamera()
         setUpPlayerControls()
@@ -91,14 +84,6 @@ class MainActivity : AppCompatActivity() {
         val webSettings = webView.settings
         webSettings.javaScriptEnabled = true
         webView.webViewClient = WebViewClient()
-    }
-
-    private fun initializeOpenCV() {
-        if (!OpenCVLoader.initDebug()) {
-            Toast.makeText(this, "OpenCV initialization failed", Toast.LENGTH_SHORT).show()
-        } else {
-            Toast.makeText(this, "OpenCV initialization succeeded", Toast.LENGTH_SHORT).show()
-        }
     }
 
     private fun initializeModel() {
@@ -168,16 +153,6 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun playVideo() {
-//        videoView = findViewById(R.id.videoView)
-//        // array of video URIs
-//        val videos = arrayOf(
-//            Uri.parse("android.resource://" + packageName + "/" + R.raw.testvideo),
-//            // ... add more URIs
-//        )
-//        videoView.setVideoURI(videos.random())
-//        videoView.setOnPreparedListener { mp: MediaPlayer ->
-//            mp.start()
-//        }
         val videoLinks = arrayOf(
             "https://www.youtube.com/watch?v=AtrbswyzHAs",
             "https://www.youtube.com/watch?v=QWqrfuW0pxQ",
@@ -193,6 +168,7 @@ class MainActivity : AppCompatActivity() {
         pause()
         playerLayout.visibility = View.INVISIBLE
         playButton.visibility = View.VISIBLE
+        //testModelOnImages()
     }
 
     private fun play() {
@@ -222,7 +198,7 @@ class MainActivity : AppCompatActivity() {
                         session.setRepeatingRequest(captureRequest, null, handler)
 
                         imageReader.setOnImageAvailableListener({ reader ->
-                            Log.i(TAG, "Captured image: %s".format(capturedMats.size))
+                            Log.i(TAG, "Captured image: %s".format(capturedBitmap.size))
                             val image = reader.acquireLatestImage()
                             if (image != null) {
                                 val buffer = image.planes[0].buffer
@@ -232,23 +208,18 @@ class MainActivity : AppCompatActivity() {
                                 // Save the image to a folder
                                 saveImageToDevice(image)
 
-                                val mat = Mat()
-                                Utils.bitmapToMat(yuv420ToBitmap(image), mat)
-                                Imgproc.cvtColor(mat, mat, Imgproc.COLOR_RGBA2RGB)
+                                //val mat = getScaledImageMatrix(image)
+                                //capturedMats.add(mat)
+                                capturedBitmap.add(getScaledBitmapFromImage(image))
 
-                                // Resize the Mat to the required dimensions for the model
-                                val resizedMat = Mat()
-                                Imgproc.resize(mat, resizedMat, Size(128.0, 128.0))
-                                capturedMats.add(resizedMat)
-                                //mat.release() // Free up the memory
                                 image.close()
                             }
 
-                            if (capturedMats.size >= maxCaptures) {
+                            if (capturedBitmap.size >= maxCaptures) {
                                 session.close() //close capture session
-                                Log.i(TAG, "Max Capture reached: %s".format(capturedMats.size))
+                                Log.i(TAG, "Max Capture reached: %s".format(capturedBitmap.size))
 
-                                if (inspectImageForCamera(capturedMats)) {
+                                if (inspectImageForCamera(capturedBitmap)) {
                                     Log.i(TAG, "CAMERA DETECTED")
                                     handler.post {
                                         Toast.makeText(applicationContext, "Camera detected!", Toast.LENGTH_SHORT).show()
@@ -259,7 +230,7 @@ class MainActivity : AppCompatActivity() {
                                 } else {
                                     Log.i(TAG, " --------------->>>>>>>>>>>> CAMERA NOT DETECTED")
                                 }
-                                capturedMats.clear()
+                                capturedBitmap.clear()
                             }
                         }, handler)
                     }
@@ -280,6 +251,22 @@ class MainActivity : AppCompatActivity() {
             return
         }
         cameraManager.openCamera(frontCameraId, cameraStateCallback, handler)
+    }
+
+    private fun getScaledBitmapFromImage(image: Image): Bitmap {
+        val originalBitmap = yuv420ToBitmap(image)
+        // Resize the Bitmap
+        val matrix = Matrix()
+        matrix.postScale(128f / originalBitmap.width, 128f / originalBitmap.height)
+        return Bitmap.createBitmap(
+            originalBitmap,
+            0,
+            0,
+            originalBitmap.width,
+            originalBitmap.height,
+            matrix,
+            true
+        )
     }
 
     private fun saveImageToDevice(image: Image) {
@@ -308,17 +295,17 @@ class MainActivity : AppCompatActivity() {
     }
 
 
-    private fun inspectImageForCamera(capturedMats: MutableList<Mat>): Boolean {
+    private fun inspectImageForCamera(capturedBitmap: MutableList<Bitmap>): Boolean {
 
         // Loop through each captured image for analysis
-        for (originalMat in capturedMats) {
+        for (originalBitmap in capturedBitmap) {
             // Assume isCameraDetected is determined from contours, edges, etc.
             //val isCameraDetected = analyzeMats(originalMat):
             val isCameraDetected = true
 
             if (isCameraDetected) {
                 // Prepare the preprocessed image for ML model
-                val inputBuffer: ByteBuffer = matToByteBuffer(originalMat)// Convert your Mat to ByteBuffer
+                val inputBuffer: ByteBuffer = bitmapToByteBuffer(originalBitmap)// Convert your Mat to ByteBuffer
 
                 // Perform ML inference
                 val output = Array(1) { FloatArray(2) }  // Assume binary classification
@@ -326,8 +313,8 @@ class MainActivity : AppCompatActivity() {
 
                 // Post-process ML model output
                 Log.i(TAG, output.contentDeepToString())
-                Log.i(TAG, "Model output is: %s".format(output[0][1]))
-                if (output[0][1] > 0.6) {  // Just an example condition
+                Log.i(TAG, "Model prob for Camera Present is: %s".format(output[0][1]))
+                if (output[0][1] > 0.7) {  // Just an example condition
                     // Confirmed, it is a camera
                     return true
                 }
@@ -335,50 +322,6 @@ class MainActivity : AppCompatActivity() {
 
         }
         return false
-    }
-
-    private fun analyzeMats(mat: Mat): Boolean {
-        // Image Preprocessing and Basic Analysis
-        val blurredMat = Mat()
-        Imgproc.GaussianBlur(mat, blurredMat, Size(5.0, 5.0), 0.0)
-
-        val edgesMat = Mat()
-        Imgproc.Canny(blurredMat, edgesMat, 100.0, 200.0)
-
-        val contours: MutableList<MatOfPoint> = ArrayList()
-        val hierarchy = Mat()
-        Imgproc.findContours(edgesMat, contours, hierarchy, Imgproc.RETR_EXTERNAL, Imgproc.CHAIN_APPROX_SIMPLE)
-
-        return analyzeContours(contours)
-
-    }
-
-    private fun analyzeContours(contours: MutableList<MatOfPoint>): Boolean {
-        // Initialize variables to store criteria
-        var contourCount = 0
-        var hasCircularShape = false
-        var hasRectangularShape = false
-
-        // Loop through each contour and analyze
-        for (contour in contours) {
-            val area = Imgproc.contourArea(contour)
-            if (area > 100) {  // Arbitrary area threshold
-                contourCount++
-
-                val peri = Imgproc.arcLength(MatOfPoint2f(*contour.toArray()), true)
-                val approx = MatOfPoint2f()
-                Imgproc.approxPolyDP(MatOfPoint2f(*contour.toArray()), approx, 0.02 * peri, true)
-
-                val total = approx.total().toInt()
-                if (total == 4) {
-                    hasRectangularShape = true
-                } else if (total > 6) {  // The higher the total, the more circular the shape
-                    hasCircularShape = true
-                }
-            }
-        }
-        //Implement your specific criteria here
-        return contourCount > 2 && (hasCircularShape || hasRectangularShape)
     }
 
     // Function to load test images and run the model on them
@@ -390,17 +333,13 @@ class MainActivity : AppCompatActivity() {
                 for (image in imagesList) {
                     val inputStream = assetManager.open("camera_present/$image")
                     val bitmap = BitmapFactory.decodeStream(inputStream)
-                    val mat = Mat()
-                    Utils.bitmapToMat(bitmap, mat)
-                    Imgproc.cvtColor(mat, mat, Imgproc.COLOR_RGBA2RGB)
-
-                    // Resize the Mat to the required dimensions for the model
-                    val resizedMat = Mat()
-                    Imgproc.resize(mat, resizedMat, Size(128.0, 128.0))
-
-                    val inputBuffer: ByteBuffer = matToByteBuffer(resizedMat) // Assuming you have a function to convert Mat to ByteBuffer
 
                     // Run the model
+                    val matrix = Matrix()
+                    matrix.postScale(128f / bitmap.width, 128f / bitmap.height)
+                    val resizedBitMap = Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
+                    val inputBuffer: ByteBuffer = bitmapToByteBuffer(resizedBitMap)
+
                     val output = Array(1) { FloatArray(2) }
                     tflite.run(inputBuffer, output)
 
