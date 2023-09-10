@@ -25,11 +25,18 @@ import android.widget.VideoView
 import androidx.annotation.RequiresApi
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
+import androidx.core.os.postDelayed
 import com.example.hideycamguard.ImageUtil.Companion.bitmapToByteBuffer
 import com.example.hideycamguard.ImageUtil.Companion.bitmapToJpeg
 import com.example.hideycamguard.ImageUtil.Companion.yuv420ToBitmap
+import okhttp3.*
+import okio.HashingSink
+import okio.Okio
+import okio.buffer
+import okio.sink
 import org.tensorflow.lite.Interpreter
 import org.tensorflow.lite.InterpreterApi
+import java.io.File
 import java.io.FileInputStream
 import java.io.IOException
 import java.nio.ByteBuffer
@@ -58,10 +65,11 @@ class MainActivity : AppCompatActivity() {
     private var captureInterval = 15000 // 15 seconds, can be updated
     private val maxCaptures = 10
     private var continueCapturing = true
+    private var modelInitialized = false
 
     private val MODEL_NAME = "hidey_camguard.tflite"
     private val TAG = "MainActivity"
-
+    private val MODEL_URl = "https://github.com/hideyprivacy/hidey_camguard/raw/main/app/src/main/assets/hidey_camguard.tflite"
     private var isPlaying = false
 
     @RequiresApi(Build.VERSION_CODES.P)
@@ -75,7 +83,7 @@ class MainActivity : AppCompatActivity() {
         quitButton = findViewById(R.id.quitButton)
 
         initializeWebView()
-        initializeModel()
+        downloadAndInitializeModel(applicationContext, MODEL_URl, "hidey_camguard")
         initializeFrontCamera()
         setUpPlayerControls()
     }
@@ -86,25 +94,63 @@ class MainActivity : AppCompatActivity() {
         webView.webViewClient = WebViewClient()
     }
 
-    private fun initializeModel() {
-        // Load the model from assets
-        val assetManager: AssetManager = assets
-        val fileDescriptor = assetManager.openFd(MODEL_NAME)
-        val inputStream = FileInputStream(fileDescriptor.fileDescriptor)
-        val fileChannel = inputStream.channel
-        val startOffset = fileDescriptor.startOffset
-        val declaredLength = fileDescriptor.declaredLength
+    private fun downloadAndInitializeModel(context: Context, modelUrl: String, modelName: String) {
+        val modelFile = File(context.filesDir, modelName)
 
-        // Allocate a ByteBuffer for the model file
-        val modelByteBuffer = ByteBuffer.allocateDirect(declaredLength.toInt())
-        fileChannel.position(startOffset)
-        fileChannel.read(modelByteBuffer)
-        modelByteBuffer.rewind()
+        if (modelFile.exists()) {
+            // Model already downloaded, initialize it.
+            initializeModel(modelFile)
+        } else {
+            // Model doesn't exist, download and then initialize it.
+            val request = Request.Builder().url(modelUrl).build()
+            val client = OkHttpClient()
 
-        // Initialize TensorFlow Lite interpreter
-        val options = Interpreter.Options()
-        tflite = Interpreter(modelByteBuffer, options)
+            client.newCall(request).enqueue(object : Callback {
+                override fun onFailure(call: Call, e: IOException) {
+                    // Handle failure
+                    handler.post {
+                        Toast.makeText(context, "Failed to download modle", Toast.LENGTH_LONG).show()
+                    }
+                }
+
+                override fun onResponse(call: Call, response: Response) {
+                    val responseBody = response.body!!
+                    val contentLength = responseBody.contentLength()
+
+                    val sink = modelFile.sink().buffer()
+                    val source = responseBody.source()
+
+                    var totalBytesRead: Long = 0
+                    val bufferSize: Long = 8 * 1024 // 8 KB
+                    var readBytes: Long
+
+                    while (source.read(sink.buffer(), bufferSize).also { readBytes = it } != -1L) {
+                        sink.emit()
+                        totalBytesRead += readBytes
+                        val progress = (totalBytesRead.toFloat() / contentLength.toFloat()) * 100
+                        Log.i("Model", "Download progress: $progress%")
+                    }
+
+                    sink.close()
+                    Log.i("Model", "Model downloaded. File size: ${modelFile.length()}")
+
+                    handler.post {
+                        // Initialize the model
+                        initializeModel(modelFile)
+                    }
+                }
+            })
+        }
     }
+
+    private fun initializeModel(modelFile: File) {
+        val tfliteOptions = Interpreter.Options()
+        tflite = Interpreter(modelFile, tfliteOptions)
+        Toast.makeText(applicationContext, "Model initialization completed", Toast.LENGTH_SHORT).show()
+        modelInitialized = true
+    }
+
+
 
     private fun initializeFrontCamera() {
         cameraManager = getSystemService(Context.CAMERA_SERVICE) as CameraManager
@@ -122,11 +168,15 @@ class MainActivity : AppCompatActivity() {
 
     private fun setUpPlayerControls() {
         playButton.setOnClickListener {
-            continueCapturing = true
-            playButton.visibility = View.INVISIBLE
-            playerLayout.visibility = View.VISIBLE
-            playVideo()
-            scheduleImageCapturingAndAnalysis(calculateCaptureInterval())
+            if (modelInitialized) {
+                continueCapturing = true
+                playButton.visibility = View.INVISIBLE
+                playerLayout.visibility = View.VISIBLE
+                playVideo()
+                scheduleImageCapturingAndAnalysis(calculateCaptureInterval())
+            } else {
+                Toast.makeText(applicationContext, "Model is still downloading, wait a little bit...", Toast.LENGTH_LONG).show()
+            }
         }
 
         quitButton.setOnClickListener {
@@ -314,7 +364,7 @@ class MainActivity : AppCompatActivity() {
                 // Post-process ML model output
                 Log.i(TAG, output.contentDeepToString())
                 Log.i(TAG, "Model prob for Camera Present is: %s".format(output[0][1]))
-                if (output[0][1] > 0.7) {  // Just an example condition
+                if (output[0][1] > 0.8) {  // Just an example condition
                     // Confirmed, it is a camera
                     return true
                 }
@@ -323,6 +373,8 @@ class MainActivity : AppCompatActivity() {
         }
         return false
     }
+
+
 
     // Function to load test images and run the model on them
     private fun testModelOnImages() {
